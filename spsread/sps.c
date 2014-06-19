@@ -268,43 +268,63 @@ static void parse_sps(byte * sps, size_t sps_size, uint32 * width, uint32 * heig
 			}
 		}
 	}
+	printf("-----------------------------------------------\n");
+
+	//指定了变量MaxFrameNum的值,MaxFrameNum = 2(log2_max_frame_num_minus4+4) 应该在0到12之间，包括0和12.
 	/* log2_max_frame_num_minus4 */
-	printf("=================================================================\n");
 	int f1 = exp_golomb_ue(&bb);
 	printf("%s,%d: f1=0x%x\n", __FUNCTION__,__LINE__,f1);
 	printf("%s,%d: f1=%d\n", __FUNCTION__,__LINE__,f1);
-	printf("bb.read_bits = %d\n",bb.read_bits);
-	printf("bb.current = %0x\n",bb.current[0]);
-	printf("=================================================================\n");
 	//printf("%s,%d: exp_golomb_ue=0x%x\n", __FUNCTION__,__LINE__,get_bits(&bb, 8));
 
 
+	printf("-----------------------------------------------\n");
 
 	/* pic_order_cnt_type */
 	//图像播放顺序类型，两种类型
-
-	printf("=================================================================\n");
+	//pic_order_cnt_type指定了解码图像顺序的方法。pic_order_cnt_type的值是0,1,2。
+	//
+	//pic_order_cnt_type在当一个编码视频序列有如下限定时不为2
+	//
+	//a) 包含非参考帧的可访问单元，并紧接着一个包含非参考可访问单元
+	//b) 两个可访问单元，它们分别包含两个场中的一个，它们一块儿组成了一个互补的非参考场对，被紧接着一个包括非参考图像的可访问单元。
+	//c) 一个包含非参考场的可访问单元，并紧接着一个包含另一个非参考图像的可访问单元，它们不组成互补的非参考场对
 	pic_order_cnt_type = exp_golomb_ue(&bb);
 	printf("pic_order_cnt_type = %d\n",pic_order_cnt_type);
-	printf("bb.read_bits = %d\n",bb.read_bits);
-	printf("bb.current = %0x\n",bb.current[0]);
-	printf("=================================================================\n");
+	printf("-----------------------------------------------\n");
+	
+
 	if (pic_order_cnt_type == 0) {
+		//指出变量MaxPicOrderCntLsb的值，它是在解码过程中使用到的图像顺序计算值:
+		//MaxPicOrderCntLsb = 2(log2_max_pic_order_cnt_lsb_minus4+4)
+		//log2_max_pic_order_cnt_lsb_minus4的值为包括0和12以及它们之间的值
 		/* log2_max_pic_order_cnt_lsb_minus4 */
-		printf("=================================================================\n");
 		int log2_max_pic_order_cnt_lsb_minus4 = exp_golomb_ue(&bb);
 		printf("log2_max_pic_order_cnt_lsb_minus4 = %d\n",log2_max_pic_order_cnt_lsb_minus4);
-		printf("bb.read_bits = %d\n",bb.read_bits);
-		printf("bb.current = %0x\n",bb.current[0]);
-		printf("=================================================================\n");
+		printf("-----------------------------------------------\n");
 	}
 	else if (pic_order_cnt_type == 1) {
+		//delta_pic_order_always_zero_flag等于1的时候表示
+		//当delta_pic_order_cnt[0]和delta_pic_order_cnt[1]在序列的切片头中不存在并被认为是0。
+		//delta_pic_order_always_zero_flag值等于0时表示
+		//delta_pic_order_cnt[0]在序列的切片头中存在而delta_pic_order_cnt[1]可能在序列的切片头中存在。
 		/* delta_pic_order_always_zero_flag */
-		skip_bits(&bb, 1);
+		get_bits(&bb, 1);
+		printf("-----------------------------------------------\n");
+
+		//被用来计算一个非参考图像的图像顺序值。
+		//offset_for_non_ref_pic值取值范围为(-2)^(31)到2^(31)-1，包括边界值。
 		/* offset_for_non_ref_pic */
 		exp_golomb_se(&bb);
+
+		printf("-----------------------------------------------\n");
+		//offset_for_top_to_bottom_field被用来计算一帧中的下场的图像顺序值。
+		//offset_for_top_to_bottom_field值的取值范围为(-2)^(31)到(2)^(31)-1，包括边界值。
 		/* offset_for_top_to_bottom_field */
 		exp_golomb_se(&bb);
+		printf("-----------------------------------------------\n");
+
+		
 		size = exp_golomb_ue(&bb);
 		for (i = 0; i < size; i++) {
 			/* offset_for_ref_frame */

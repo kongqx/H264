@@ -248,12 +248,31 @@ static void parse_sps(byte * sps, size_t sps_size, uint32 * width, uint32 * heig
 	printf("-----------------------------------------------\n");
 
 	if (profile == 100 || profile == 110 || profile == 122 || profile == 144) {
-		/* chroma format idx */
+		//chroma_format_idc 取值是0 ~ 3，表示的色度采样结构
+		//chroma_format_idc 色彩格式 
+		//0                 单色
+		//1                4:2:0 
+		//2                4:2:2 
+		//3                4:4:4 
+		//chroma_format_idc
 		if (exp_golomb_ue(&bb) == 3) {
+			printf("-----------------------------------------------\n");
+			//等于1 时， 应用8.5 节规定的残余颜色变换。
+			//等于0时则不使用残余颜色变换。
+			//当residual_colour_transform_flag 不存在时，默认其值为0。
+			//residual_colour_transform_flag
 			skip_bits(&bb, 1);
 		}
+		printf("-----------------------------------------------\n");
+		//bit_depth_luma_minus8是指亮度队列样值的比特深度以及亮度量化参数范围的取值偏移QpBdOffsetY
+		//如下所示：
+		//BitDepthY = 8 + bit_depth_luma_minus8 (7-1)
+		//QpBdOffsetY = 6 * bit_depth_luma_minus8 (7-2)
+		//当bit_depth_luma_minus8 不存在时，应推定其值为0。bit_depth_luma_minus8 取值范围应该在0 到4 之间（包括0和4）。
 		/* bit depth luma minus8 */
 		exp_golomb_ue(&bb);
+		printf("-----------------------------------------------\n");
+
 		/* bit depth chroma minus8 */
 		exp_golomb_ue(&bb);
 		/* Qpprime Y Zero Transform Bypass flag */

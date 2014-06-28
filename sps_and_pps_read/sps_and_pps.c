@@ -110,7 +110,7 @@ static void parse_scaling_list(uint32 size, bit_buffer * bb) {
 static void parse_sps(byte * sps, size_t sps_size, uint32 * width, uint32 * height) {
 	bit_buffer bb;
 	uint32 profile, pic_order_cnt_type, width_in_mbs, height_in_map_units;
-	uint32 i, size, left, right, top, bottom;
+	uint32 i, size, crop_left, crop_right, crop_top, crop_bottom;
 	uint8 frame_mbs_only_flag;
 
 
@@ -273,6 +273,8 @@ static void parse_sps(byte * sps, size_t sps_size, uint32 * width, uint32 * heig
 		exp_golomb_ue(&bb);
 		printf("-----------------------------------------------\n");
 
+		//
+
 		/* bit depth chroma minus8 */
 		exp_golomb_ue(&bb);
 		/* Qpprime Y Zero Transform Bypass flag */
@@ -289,7 +291,7 @@ static void parse_sps(byte * sps, size_t sps_size, uint32 * width, uint32 * heig
 	}
 	printf("-----------------------------------------------\n");
 
-	//指定了变量MaxFrameNum的值,MaxFrameNum = 2(log2_max_frame_num_minus4+4) 应该在0到12之间，包括0和12.
+	//指定了变量MaxFrameNum的值,MaxFrameNum = 2^(log2_max_frame_num_minus4+4) 应该在0到12之间，包括0和12.
 	/* log2_max_frame_num_minus4 */
 	int f1 = exp_golomb_ue(&bb);
 	printf("%s,%d: f1=0x%x\n", __FUNCTION__,__LINE__,f1);
@@ -343,7 +345,7 @@ static void parse_sps(byte * sps, size_t sps_size, uint32 * width, uint32 * heig
 		exp_golomb_se(&bb);
 		printf("-----------------------------------------------\n");
 
-		
+		//num_ref_frames_in_pic_order_cnt_cycle
 		size = exp_golomb_ue(&bb);
 		for (i = 0; i < size; i++) {
 			/* offset_for_ref_frame */
@@ -354,67 +356,321 @@ static void parse_sps(byte * sps, size_t sps_size, uint32 * width, uint32 * heig
 
 	/* num_ref_frames */
 	//参考帧个数
-	printf("=================================================================\n");
+	printf("-----------------------------------------------\n");
 	int num_ref_frames = exp_golomb_ue(&bb);
 	printf("num_ref_frames = %d\n",num_ref_frames);
-	printf("bb.read_bits = %d\n",bb.read_bits);
-	printf("bb.current = %0x\n",bb.current[0]);
-	printf("=================================================================\n");
+	printf("-----------------------------------------------\n");
 
 	/* gaps_in_frame_num_value_allowed_flag */
 	skip_bits(&bb, 1);
+	printf("-----------------------------------------------\n");
 
-	printf("=================================================================\n");
-	/* pic_width_in_mbs */
+	/* pic_width_in_mbs */ //pic_width_in_mbs_minus1 
 	width_in_mbs = exp_golomb_ue(&bb) + 1;
 	printf("width_in_mbs = %d\n",width_in_mbs);
-	printf("bb.read_bits = %d\n",bb.read_bits);
-	printf("bb.current = %0x\n",bb.current[0]);
 
+	printf("-----------------------------------------------\n");
 
-	printf("=================================================================\n");
-	/* pic_height_in_map_units */
+	/* pic_height_in_map_units */ //pic_height_in_map_units_minus1
 	height_in_map_units = exp_golomb_ue(&bb) + 1;
 	printf("height_in_map_units = %d\n",height_in_map_units);
-	printf("bb.read_bits = %d\n",bb.read_bits);
-	printf("bb.current = %0x\n",bb.current[0]);
 
-	printf("=================================================================\n");
+	printf("-----------------------------------------------\n");
 
 	/* frame_mbs_only_flag */
 	// 本句法元素等于 0 时表示本序列中所有图像的编码模式都是帧，没有其他编码模式存在；
 	// 本句法元素等于 1 时  ，表示本序列中图像的编码模式可能是帧，也可能是场或帧场自适应，某个图像具体是哪一种要由其他句法元素决定
 	//
 	frame_mbs_only_flag = get_bit(&bb);
+
+	*width = width_in_mbs * 16;
+	*height = height_in_map_units * 16 * (2 - frame_mbs_only_flag);
+
 	if (!frame_mbs_only_flag) {
+		//  mb_adaptiv_frame_field_flag /* 指明本序列是否是帧场自适应模式：
+		//
+		//  frame_mbs_only_flag=1，全部是帧
+		//
+		//  frame_mbs_only_flag=0， mb_adaptiv_frame_field_flag=0，帧场共存
+		//
+		//  frame_mbs_only_flag=0， mb_adaptiv_frame_field_flag=1，帧场自适应和场共存
+		//
 		/* mb_adaptive_frame_field */
 		skip_bits(&bb, 1);
 	}
 
-
+	//用于指明B片的直接和skip模式下的运动矢量的计算方式
 	/* direct_8x8_inference_flag */
 	skip_bits(&bb, 1);
+
+	printf("-----------------------------------------------\n");
 	/* frame_cropping */
+	//frame_cropping_flag
 	//解码器是否要将图像裁剪后输出，如果是，后面为裁剪的左右上下的宽度
 	//
-	left = right = top = bottom = 0;
-	if (get_bit(&bb)) {
-		left = exp_golomb_ue(&bb) * 2;
-		right = exp_golomb_ue(&bb) * 2;
-		top = exp_golomb_ue(&bb) * 2;
-		bottom = exp_golomb_ue(&bb) * 2;
-		if (!frame_mbs_only_flag) {
-			top *= 2;
-			bottom *= 2;
+	int frame_cropping_flag = 0;
+	frame_cropping_flag = get_bit(&bb);
+	crop_left = crop_right = crop_top = crop_bottom = 0;
+	if (frame_cropping_flag) {
+		//frame_crop_left_offset
+		crop_left = exp_golomb_ue(&bb);
+		//frame_crop_right_offset
+		crop_right = exp_golomb_ue(&bb);
+		//frame_crop_top_offset
+		crop_top = exp_golomb_ue(&bb);
+		//frame_crop_bottom_offset
+		crop_bottom = exp_golomb_ue(&bb);
+	}
+
+	printf("-----------------------------------------------\n");
+	/* width */
+
+	*width = *width - 2* (crop_left + crop_right);
+	/* height */
+	if(frame_mbs_only_flag)
+	{
+		*height = *height - 2*(crop_top + crop_bottom);
+	}
+	else
+	{
+		*height = *height - 4*(crop_top + crop_bottom);
+	}
+
+	printf("-----------------------------------------------\n");
+	//vui_parameters_present_flag
+	//
+	#define Extended_SAR 255
+
+	int vui_parameters_present_flag = get_bit(&bb);
+	if(vui_parameters_present_flag)
+	{
+		//TODO
+		//aspect_ratio_info_present_flag 
+		int aspect_ratio_info_present_flag = get_bit(&bb);
+		if(aspect_ratio_info_present_flag)
+		{
+			int aspect_ratio_idc = get_bits(&bb, 8);
+			if(aspect_ratio_idc == Extended_SAR)
+			{
+				int sar_width = get_bits(&bb, 16);
+				int sar_height = get_bits(&bb, 16);
+			}
+		}
+		
+		int overscan_info_present_flag = get_bit(&bb);
+		if(overscan_info_present_flag)
+		{
+			int overscan_appropriate_flag = get_bit(&bb);
+		}
+
+		int video_signal_type_present_flag = get_bit(&bb);
+		if(video_signal_type_present_flag)
+		{
+			int video_format = get_bits(&bb, 3);
+			int video_full_range_flag = get_bit(&bb);
+
+			int colour_description_present_flag = get_bit(&bb);
+			if(colour_description_present_flag)
+			{
+				int colour_primaries = get_bits(&bb, 8);
+				int transfer_characteristics = get_bits(&bb, 8);
+				int matrix_coefficients = get_bits(&bb, 8);
+			}
+		}
+
+
+		int chroma_loc_info_present_flag = get_bit(&bb);
+		if(chroma_loc_info_present_flag)
+		{
+			int chroma_sample_loc_type_top_field = exp_golomb_ue(&bb);
+			int chroma_sample_loc_type_bottom_field = exp_golomb_ue(&bb);
+		}
+
+		int timing_info_present_flag = get_bit(&bb);
+		if(timing_info_present_flag)
+		{
+			int num_units_in_tick = get_bits(&bb, 32);
+			int time_scale = get_bits(&bb, 32);
+			int fixed_frame_rate_flag = get_bit(&bb);
+		} 
+
+
+		int nal_hrd_parameters_present_flag = get_bit(&bb);
+		if(nal_hrd_parameters_present_flag)
+		{
+			int cpb_cnt_minus1 = exp_golomb_ue(&bb);
+			int bit_rate_scale = get_bits(&bb, 4);
+			int cpb_size_scale = get_bits(&bb, 4);
+
+			int SchedSelIdx = 0;
+			int bit_rate_value_minus1[16];      //0 ue(v)
+			int cpb_size_value_minus1[16];      //0 ue(v)
+			int cbr_flag[16];                   //0 u(1)
+			for(SchedSelIdx=0; SchedSelIdx<=cpb_cnt_minus1; SchedSelIdx++)
+			{
+				bit_rate_value_minus1[SchedSelIdx] = exp_golomb_ue(&bb);
+				cpb_size_value_minus1[SchedSelIdx] = exp_golomb_ue(&bb);
+				cbr_flag[SchedSelIdx] = get_bit(&bb);
+			}
+
+
+			int initial_cpb_removal_delay_length_minus1 = get_bits(&bb, 5);
+			int cpb_removal_delay_length_minus1 = get_bits(&bb, 5);
+			int dpb_output_delay_length_minus1 = get_bits(&bb, 5);
+			int time_offset_length = get_bits(&bb, 5);
+		}
+
+
+		int vcl_hrd_parameters_present_flag = get_bit(&bb);
+		if(vcl_hrd_parameters_present_flag)
+		{
+			int cpb_cnt_minus1 = exp_golomb_ue(&bb);
+			int bit_rate_scale = get_bits(&bb, 4);
+			int cpb_size_scale = get_bits(&bb, 4);
+			
+			
+			int SchedSelIdx = 0;
+			int bit_rate_value_minus1[16];      //0 ue(v)
+			int cpb_size_value_minus1[16];      //0 ue(v)
+			int cbr_flag[16];                   //0 u(1)
+
+			for(SchedSelIdx=0; SchedSelIdx<=cpb_cnt_minus1; SchedSelIdx++)
+			{
+				bit_rate_value_minus1[SchedSelIdx] = exp_golomb_ue(&bb);
+				cpb_size_value_minus1[SchedSelIdx] = exp_golomb_ue(&bb);
+				cbr_flag[SchedSelIdx] = get_bit(&bb);
+			}
+
+
+			int initial_cpb_removal_delay_length_minus1 = get_bits(&bb, 5);
+			int cpb_removal_delay_length_minus1 = get_bits(&bb, 5);
+			int dpb_output_delay_length_minus1 = get_bits(&bb, 5);
+			int time_offset_length = get_bits(&bb, 5);        
+		}
+
+
+		if(nal_hrd_parameters_present_flag || vcl_hrd_parameters_present_flag)
+		{
+			int low_delay_hrd_flag = get_bit(&bb);
+		}
+
+		int pic_struct_present_flag = get_bit(&bb);
+
+		int bitstream_restriction_flag = get_bit(&bb);
+		if(bitstream_restriction_flag)
+		{
+			int motion_vectors_over_pic_boundaries_flag = get_bit(&bb);
+			int max_bytes_per_pic_denom = exp_golomb_ue(&bb);
+			int max_bits_per_mb_denom = exp_golomb_ue(&bb);
+			int log2_max_mv_length_horizontal= exp_golomb_ue(&bb);
+			int log2_max_mv_length_vertical = exp_golomb_ue(&bb);
+			int num_reorder_frames = exp_golomb_ue(&bb);
+			int max_dec_frame_buffering = exp_golomb_ue(&bb);
+		}
+
+
+	}
+}
+
+//pps
+static void parse_pps(byte * pps, size_t pps_size) {
+	bit_buffer bb;
+
+	bb.start = pps;
+	bb.size = pps_size;
+	bb.current = pps;
+	bb.read_bits = 0;
+	printf("---------------------\n");
+	uint8 tmp = 0;
+	int  i = 0;
+	for(i=0;i<pps_size*8;i++)
+	{
+		tmp = get_bit(&bb);
+		if(i%4)
+			printf("%d",tmp);
+		else
+			printf(" %d",tmp);
+	}
+	printf("\n");
+	bb.current = pps;
+	bb.read_bits = 0;
+
+	
+	
+
+	/* skip first byte, since we already know we're parsing a PPS */
+	skip_bits(&bb, 8);
+
+	printf("-----------------------------------------------\n");
+	int pic_parameter_set_id = exp_golomb_ue(&bb);
+	int seq_parameter_set_id = exp_golomb_ue(&bb);
+
+	int entropy_coding_mode_flag = get_bit(&bb);
+	int pic_order_present_flag = get_bit(&bb);
+
+	int num_slice_groups_minus1 = exp_golomb_ue(&bb);
+	if(num_slice_groups_minus1 > 0)
+	{
+		int  slice_group_map_type = exp_golomb_ue(&bb);
+		if(slice_group_map_type == 0)
+		{
+			int iGroup = 0;
+			int run_length_minus1[32];
+			for(iGroup=0; iGroup<=num_slice_groups_minus1; iGroup++)
+			{
+				run_length_minus1[iGroup] = exp_golomb_ue(&bb);
+			}
+		}
+		else if(slice_group_map_type == 2)
+		{
+			int iGroup = 0;
+			int top_left[32];
+			int bottom_right[32];
+			for(iGroup=0; iGroup<num_slice_groups_minus1; iGroup++)
+			{
+				top_left[iGroup] = exp_golomb_ue(&bb);
+				bottom_right[iGroup] = exp_golomb_ue(&bb);
+			}
+		}
+		else if(slice_group_map_type == 3 \
+				||slice_group_map_type == 4\
+				||slice_group_map_type == 5)
+		{
+			int slice_group_change_direction_flag = get_bit(&bb);
+			int slice_group_change_rate_minus1 = exp_golomb_ue(&bb);
+		}
+		else if(slice_group_map_type == 6)
+		{
+			int pic_size_in_map_units_minus1 = exp_golomb_ue(&bb);
+			int slice_group_id[32];
+			for(i=0; i<pic_size_in_map_units_minus1; i++)
+			{
+				/*这地方可能有问题，对u(v)理解偏差*/
+				slice_group_id[i] = exp_golomb_ue(&bb);
+			}
 		}
 	}
-	/* width */
-	*width = width_in_mbs * 16 - (left + right);
-	/* height */
-	*height = height_in_map_units * 16 - (top + bottom);
-	if (!frame_mbs_only_flag) {
-		*height *= 2;
-	}
+
+
+	int num_ref_idx_10_active_minus1 = exp_golomb_ue(&bb);
+	int num_ref_idx_11_active_minus1 = exp_golomb_ue(&bb);
+	int weighted_pred_flag = get_bit(&bb);
+	int weighted_bipred_idc = get_bits(&bb, 2);
+	int pic_init_qp_minus26 = exp_golomb_se(&bb); /*relative26*/
+	int pic_init_qs_minus26 = exp_golomb_se(&bb); /*relative26*/
+	int chroma_qp_index_offset = exp_golomb_se(&bb);
+	int deblocking_filter_control_present_flag = get_bit(&bb);
+	int constrained_intra_pred_flag = get_bit(&bb);
+	int redundant_pic_cnt_present_flag = get_bit(&bb);
+
+
+	/*pps 解析未完成
+	 *     * more_rbsp_data()不知如何实现，时间原因
+	 *         * 暂时搁置，没有深入。FIXME: 
+	 *             */
+	/*TODO*/
+
+
 }
 
 
@@ -428,9 +684,11 @@ int main()
 	char spsbuf_qcif[10] = {0x67 ,0x42 ,0xE0 ,0x0A ,0x89 ,0x95 ,0x45 ,0x89 ,0xC8};
 	char spsbuf_tmp[24] = {0x67 ,0x64 ,0x00 ,0x1E ,0xAC ,0x6D ,0x01 ,0xA8 ,0x7B,0x42,0x00,0X00,0x03,0x00,0x02,0x00,0x00,0x03,0x00,0x51,0x1E,0x24,0x4D,0x40};
 
-	/*parse_sps(spsbuf_cif, 10, &width, &height);*/
-	/*printf("video width: %d\n", width);*/
-	/*printf("video height: %d\n", height);*/
+	char h264pps[4] ={0x68,0xCE,0x38,0x80};
+
+	parse_sps(spsbuf_cif, 10, &width, &height);
+	printf("video width: %d\n", width);
+	printf("video height: %d\n", height);
 
 #if 0
 	parse_sps(spsbuf_vga, 10, &width, &height);

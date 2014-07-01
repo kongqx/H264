@@ -572,6 +572,34 @@ static void parse_sps(byte * sps, size_t sps_size, uint32 * width, uint32 * heig
 	}
 }
 
+int moreRBSPData(bit_buffer *bb)
+{
+	return ((bb->current - bb->start) < bb->size) ? 1:0;
+}
+void read_scaling_list(bit_buffer* bb, int* scalingList, int sizeOfScalingList, int useDefaultScalingMatrixFlag )
+{
+	int j;
+	if(scalingList == NULL)
+	{  
+		return;
+	}  
+
+	int lastScale = 8;        
+	int nextScale = 8;
+	for( j = 0; j < sizeOfScalingList; j++ )
+	{  
+		if( nextScale != 0 )  
+		{
+			int delta_scale = exp_golomb_se(bb);
+			nextScale = ( lastScale + delta_scale + 256 ) % 256;
+			useDefaultScalingMatrixFlag = ( j == 0 && nextScale == 0 );
+		}
+		scalingList[ j ] = ( nextScale == 0 ) ? lastScale : nextScale;
+		lastScale = scalingList[ j ];  
+	}  
+}
+	    
+
 //pps
 static void parse_pps(byte * pps, size_t pps_size) {
 	bit_buffer bb;
@@ -595,7 +623,7 @@ static void parse_pps(byte * pps, size_t pps_size) {
 	bb.current = pps;
 	bb.read_bits = 0;
 
-	
+	//http://www.avbuffer.com/forum.php?mod=viewthread&tid=426	
 	
 
 	/* skip first byte, since we already know we're parsing a PPS */
@@ -615,7 +643,8 @@ static void parse_pps(byte * pps, size_t pps_size) {
 		if(slice_group_map_type == 0)
 		{
 			int iGroup = 0;
-			int run_length_minus1[32];
+			int run_length_minus1[8];
+			// up to num_slice_groups_minus1, which is <= 7 in Baseline and Extended, 0 otheriwse
 			for(iGroup=0; iGroup<=num_slice_groups_minus1; iGroup++)
 			{
 				run_length_minus1[iGroup] = exp_golomb_ue(&bb);
@@ -624,8 +653,8 @@ static void parse_pps(byte * pps, size_t pps_size) {
 		else if(slice_group_map_type == 2)
 		{
 			int iGroup = 0;
-			int top_left[32];
-			int bottom_right[32];
+			int top_left[8];
+			int bottom_right[8];
 			for(iGroup=0; iGroup<num_slice_groups_minus1; iGroup++)
 			{
 				top_left[iGroup] = exp_golomb_ue(&bb);
@@ -642,7 +671,7 @@ static void parse_pps(byte * pps, size_t pps_size) {
 		else if(slice_group_map_type == 6)
 		{
 			int pic_size_in_map_units_minus1 = exp_golomb_ue(&bb);
-			int slice_group_id[32];
+			int slice_group_id[256]; // FIXME what size?
 			for(i=0; i<pic_size_in_map_units_minus1; i++)
 			{
 				/*这地方可能有问题，对u(v)理解偏差*/
@@ -664,12 +693,44 @@ static void parse_pps(byte * pps, size_t pps_size) {
 	int redundant_pic_cnt_present_flag = get_bit(&bb);
 
 
+	
 	/*pps 解析未完成
 	 *     * more_rbsp_data()不知如何实现，时间原因
 	 *         * 暂时搁置，没有深入。FIXME: 
 	 *             */
 	/*TODO*/
+	if(moreRBSPData(&bb))
+	{
+		int transform_8x8_mode_flag  =  get_bit(&bb);
+		int pic_scaling_matrix_present_flag  = get_bit(&bb);
+		if(pic_scaling_matrix_present_flag)
+		{
+			int pic_scaling_list_present_flag[8];
+			int * ScalingList4x4[6];
+			int UseDefaultScalingMatrix4x4Flag[6];
+			int *ScalingList8x8[2];
+			int UseDefaultScalingMatrix8x8Flag[2];
 
+			for (i = 0; i < 6 + 2 * transform_8x8_mode_flag; i++) {
+				pic_scaling_list_present_flag[i] = get_bit(&bb);
+				if (pic_scaling_list_present_flag[i]) 
+				{
+					parse_scaling_list(i < 6 ? 16 : 64, &bb);
+					if(i < 6)
+					{
+						read_scaling_list(&bb, ScalingList4x4[i], 16, UseDefaultScalingMatrix4x4Flag[i]);
+
+					}
+					else
+					{
+						read_scaling_list(&bb, ScalingList8x8[i - 6], 64, UseDefaultScalingMatrix8x8Flag[i - 6]);
+
+					}
+
+				}
+			}
+		}
+	}
 
 }
 
